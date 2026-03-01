@@ -28,12 +28,13 @@ defmodule Loom.Tools.TeamSpawn do
     template = param(params, :template)
     project_path = param(params, :project_path) || param(context, :project_path)
     parent_team_id = param(context, :parent_team_id)
+    model = param(context, :model)
 
     if template do
       spawn_from_template(team_name, template, project_path)
     else
       roles = param!(params, :roles)
-      spawn_from_roles(team_name, roles, project_path, parent_team_id)
+      spawn_from_roles(team_name, roles, project_path, parent_team_id, model)
     end
   end
 
@@ -64,13 +65,17 @@ defmodule Loom.Tools.TeamSpawn do
     end
   end
 
-  defp spawn_from_roles(team_name, roles, project_path, parent_team_id \\ nil) do
+  defp spawn_from_roles(team_name, roles, project_path, parent_team_id, model) do
     {:ok, team_id} =
       if parent_team_id do
         Manager.create_sub_team(parent_team_id, "architect", name: team_name, project_path: project_path)
       else
         Manager.create_team(name: team_name, project_path: project_path)
       end
+
+    spawn_opts =
+      [project_path: project_path]
+      |> then(fn opts -> if model, do: [{:model, model} | opts], else: opts end)
 
     results =
       Enum.map(roles, fn role_map ->
@@ -81,7 +86,7 @@ defmodule Loom.Tools.TeamSpawn do
         if is_nil(role_atom) do
           "  - #{name} (#{role}): failed - unknown role. Valid: #{Enum.join(@valid_roles, ", ")}"
         else
-          case Manager.spawn_agent(team_id, name, role_atom, project_path: project_path) do
+          case Manager.spawn_agent(team_id, name, role_atom, spawn_opts) do
             {:ok, _pid} -> "  - #{name} (#{role_atom}): spawned"
             {:error, reason} -> "  - #{name} (#{role_atom}): failed - #{inspect(reason)}"
           end

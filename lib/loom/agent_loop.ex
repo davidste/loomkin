@@ -133,7 +133,7 @@ defmodule Loom.AgentLoop do
     Logger.debug("AgentLoop calling LLM: #{provider}:#{model_id}, #{length(req_messages)} messages, #{length(opts[:tools] || [])} tools")
 
     case LoomTelemetry.span_llm_request(telemetry_meta, fn ->
-           call_llm(provider, model_id, req_messages, opts)
+           call_llm(provider, model_id, req_messages, [{:stream_config, config} | opts])
          end) do
       {:ok, response} ->
         classified = ReqLLM.Response.classify(response)
@@ -391,13 +391,28 @@ defmodule Loom.AgentLoop do
   end
 
   defp call_llm(provider, model_id, messages, opts) do
+    {config, opts} = Keyword.pop(opts, :stream_config)
     model_spec = "#{provider}:#{model_id}"
 
-    try do
-      ReqLLM.generate_text(model_spec, messages, opts)
-    rescue
-      e -> {:error, Exception.message(e)}
-    end
+    if config, do: emit(config, :stream_start, %{})
+
+    result =
+      try do
+        with {:ok, stream_response} <- ReqLLM.stream_text(model_spec, messages, opts) do
+          ReqLLM.StreamResponse.process_stream(stream_response,
+            on_result: fn text ->
+              if config, do: emit(config, :stream_delta, %{text: text})
+            end,
+            on_tool_call: fn _chunk -> :ok end
+          )
+        end
+      rescue
+        e -> {:error, Exception.message(e)}
+      end
+
+    if config, do: emit(config, :stream_end, %{})
+
+    result
   end
 
   defp build_req_messages(windowed_messages) do

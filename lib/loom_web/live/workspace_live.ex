@@ -28,7 +28,12 @@ defmodule LoomWeb.WorkspaceLive do
         team_id: params["team_id"],
         child_teams: [],
         active_team_id: params["team_id"],
-        team_sub_tab: :activity
+        team_sub_tab: :activity,
+        streaming: false,
+        streaming_content: "",
+        architect_phase: nil,
+        plan_steps: [],
+        current_step: nil
       )
 
     case socket.assigns.live_action do
@@ -163,7 +168,18 @@ defmodule LoomWeb.WorkspaceLive do
   # --- PubSub Info ---
 
   def handle_info({:new_message, _session_id, msg}, socket) do
-    {:noreply, assign(socket, messages: socket.assigns.messages ++ [msg])}
+    socket = assign(socket, messages: socket.assigns.messages ++ [msg])
+
+    # Clear architect plan when final assistant message arrives after execution
+    socket =
+      if msg.role == :assistant && socket.assigns.plan_steps != [] &&
+           socket.assigns.architect_phase != :executing do
+        assign(socket, plan_steps: [], architect_phase: nil, current_step: nil)
+      else
+        socket
+      end
+
+    {:noreply, socket}
   end
 
   def handle_info({:session_status, _session_id, status}, socket) do
@@ -225,16 +241,47 @@ defmodule LoomWeb.WorkspaceLive do
     {:noreply, assign(socket, :child_teams, child_teams)}
   end
 
-  def handle_info({:architect_phase, _phase}, socket) do
-    {:noreply, socket}
+  # --- Errors ---
+
+  def handle_info({:llm_error, _session_id, message}, socket) do
+    {:noreply,
+     socket
+     |> assign(streaming: false, streaming_content: "", status: :idle)
+     |> put_flash(:error, message)}
   end
 
-  def handle_info({:architect_plan, _session_id, _plan_data}, socket) do
-    {:noreply, socket}
+  # --- Streaming ---
+
+  def handle_info({:stream_start, _session_id}, socket) do
+    {:noreply, assign(socket, streaming: true, streaming_content: "")}
   end
 
-  def handle_info({:architect_step, _session_id, _step}, socket) do
-    {:noreply, socket}
+  def handle_info({:stream_delta, _session_id, %{text: chunk}}, socket) do
+    {:noreply, assign(socket, streaming_content: socket.assigns.streaming_content <> chunk)}
+  end
+
+  def handle_info({:stream_end, _session_id}, socket) do
+    {:noreply, assign(socket, streaming: false, streaming_content: "")}
+  end
+
+  # --- Architect Steps ---
+
+  def handle_info({:architect_phase, phase}, socket) do
+    {:noreply, assign(socket, architect_phase: phase)}
+  end
+
+  def handle_info({:architect_plan, _session_id, plan_data}, socket) do
+    steps = plan_data["plan"] || []
+    {:noreply, assign(socket, plan_steps: steps, current_step: nil)}
+  end
+
+  def handle_info({:architect_step, _session_id, step}, socket) do
+    index =
+      Enum.find_index(socket.assigns.plan_steps, fn s ->
+        s["file"] == step["file"] && s["action"] == step["action"]
+      end)
+
+    {:noreply, assign(socket, current_step: index)}
   end
 
   def handle_info({:select_file, path}, socket) do
@@ -311,6 +358,19 @@ defmodule LoomWeb.WorkspaceLive do
     {:noreply, socket}
   end
 
+  # Agent streaming events — handled by TeamActivityComponent via its own PubSub subscription
+  def handle_info({:agent_stream_start, _agent_name, _payload}, socket) do
+    {:noreply, socket}
+  end
+
+  def handle_info({:agent_stream_delta, _agent_name, _payload}, socket) do
+    {:noreply, socket}
+  end
+
+  def handle_info({:agent_stream_end, _agent_name, _payload}, socket) do
+    {:noreply, socket}
+  end
+
   def handle_info({:child_team_created, child_team_id}, socket) do
     if connected?(socket), do: subscribe_to_team(child_team_id)
 
@@ -354,16 +414,23 @@ defmodule LoomWeb.WorkspaceLive do
   def handle_info({ref, result}, socket) when is_reference(ref) do
     Process.demonitor(ref, [:flush])
 
-    case result do
-      {:ok, _response} ->
-        Logger.debug("[WorkspaceLive] Async task completed successfully")
+    socket =
+      case result do
+        {:ok, _response} ->
+          Logger.debug("[WorkspaceLive] Async task completed successfully")
+          socket
 
-      {:error, reason} ->
-        Logger.error("[WorkspaceLive] Async task returned error: #{inspect(reason)}")
+        {:error, reason} ->
+          Logger.error("[WorkspaceLive] Async task returned error: #{inspect(reason)}")
 
-      other ->
-        Logger.warning("[WorkspaceLive] Async task returned unexpected result: #{inspect(other)}")
-    end
+          socket
+          |> assign(streaming: false, streaming_content: "")
+          |> put_flash(:error, format_llm_error(reason))
+
+        other ->
+          Logger.warning("[WorkspaceLive] Async task returned unexpected result: #{inspect(other)}")
+          socket
+      end
 
     {:noreply, assign(socket, async_task: nil)}
   end
@@ -374,6 +441,11 @@ defmodule LoomWeb.WorkspaceLive do
     end
 
     {:noreply, assign(socket, async_task: nil)}
+  end
+
+  # Catch-all for unhandled PubSub messages (team events, etc.)
+  def handle_info(_msg, socket) do
+    {:noreply, socket}
   end
 
   # --- Render ---
@@ -437,6 +509,11 @@ defmodule LoomWeb.WorkspaceLive do
             messages={@messages}
             status={@status}
             current_tool={@current_tool}
+            streaming={@streaming}
+            streaming_content={@streaming_content}
+            architect_phase={@architect_phase}
+            plan_steps={@plan_steps}
+            current_step={@current_step}
           />
 
           <%!-- Input area --%>
@@ -729,6 +806,14 @@ defmodule LoomWeb.WorkspaceLive do
 
   defp format_tokens(n) when is_number(n), do: to_string(trunc(n))
   defp format_tokens(_), do: "0"
+
+  defp format_llm_error(%{reason: reason, status: status}) when is_binary(reason) do
+    if status, do: "[#{status}] #{reason}", else: reason
+  end
+
+  defp format_llm_error(%{message: msg}) when is_binary(msg), do: msg
+  defp format_llm_error(reason) when is_binary(reason), do: reason
+  defp format_llm_error(reason), do: inspect(reason)
 
   defp parse_shell_result(result) when is_binary(result) do
     case String.split(result, "\n", parts: 2) do
