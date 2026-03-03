@@ -67,6 +67,9 @@ defmodule Loomkin.Teams.CollaborationMetrics do
   defp metric_keys_for(:conflict_detected), do: [:conflict_count]
   defp metric_keys_for(:task_rebalanced), do: [:message_flow_count, :rebalance_count]
   defp metric_keys_for(:consensus_reached), do: [:message_flow_count, :consensus_count]
+  defp metric_keys_for(:consensus_success), do: [:message_flow_count, :consensus_count]
+  defp metric_keys_for(:consensus_deadlock), do: [:message_flow_count, :conflict_count]
+  defp metric_keys_for(:consensus_escalation), do: [:message_flow_count, :conflict_count]
   defp metric_keys_for(:knowledge_propagated), do: [:message_flow_count, :discovery_share_count]
   defp metric_keys_for(_), do: [:message_flow_count]
 

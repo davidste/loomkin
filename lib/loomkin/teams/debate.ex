@@ -5,26 +5,41 @@ defmodule Loomkin.Teams.Debate do
   Runs a propose -> critique -> revise -> vote cycle across participants,
   logging proposals and critiques to the decision graph. Not a GenServer —
   coordinates via existing agent infrastructure and `Comms`.
+
+  When a `ConsensusPolicy` is provided, the debate uses policy-driven
+  convergence tracking, early-stop on quorum, and deadlock detection.
+  Without a policy, falls back to the default policy behavior.
   """
 
   alias Loomkin.Decisions.Graph
-  alias Loomkin.Teams.Comms
+  alias Loomkin.Teams.{Comms, ConsensusPolicy, ConsensusTrail}
 
   @default_max_rounds 3
   @default_round_timeout_ms 30_000
+
+  # Convergence: if top-choice weight % changes by less than this between rounds,
+  # the round is considered "stalled" for oscillation detection.
+  @convergence_epsilon 2.0
+
+  # Number of consecutive stalled rounds required to declare oscillation/deadlock.
+  @oscillation_window 3
 
   @type vote_map :: %{optional(String.t()) => String.t()}
   @type round_data :: %{
           round: pos_integer(),
           proposals: [map()],
           critiques: [map()],
-          revisions: [map()]
+          revisions: [map()],
+          convergence: map() | nil
         }
+  @type outcome :: :consensus_reached | :deadlock | :escalated | :rounds_exhausted
   @type debate_result :: %{
           winner: map() | nil,
           votes: vote_map(),
           rounds: [round_data()],
-          consensus?: boolean()
+          consensus?: boolean(),
+          outcome: outcome(),
+          rationale: String.t()
         }
 
   @doc """
@@ -35,6 +50,8 @@ defmodule Loomkin.Teams.Debate do
     * `:max_rounds` - maximum number of debate rounds (default #{@default_max_rounds})
     * `:round_timeout_ms` - timeout per round phase in ms (default #{@default_round_timeout_ms})
     * `:session_id` - optional session ID for decision graph nodes
+    * `:policy` - a `%ConsensusPolicy{}` struct controlling quorum, scope, and deadlock strategy.
+      Defaults to `ConsensusPolicy.default()`.
 
   Returns `{:ok, debate_result}` or `{:error, reason}`.
   """
@@ -48,7 +65,8 @@ defmodule Loomkin.Teams.Debate do
   end
 
   def initiate_debate(team_id, topic, participants, opts) do
-    max_rounds = Keyword.get(opts, :max_rounds, @default_max_rounds)
+    policy = Keyword.get(opts, :policy, ConsensusPolicy.default())
+    max_rounds = Keyword.get(opts, :max_rounds, policy.max_rounds)
     round_timeout = Keyword.get(opts, :round_timeout_ms, @default_round_timeout_ms)
     session_id = Keyword.get(opts, :session_id)
 
@@ -63,19 +81,82 @@ defmodule Loomkin.Teams.Debate do
       Comms.send_to(team_id, participant, {:debate_start, debate_id, topic, participants})
     end)
 
-    rounds =
-      Enum.map(1..max_rounds, fn round_num ->
-        {:ok, round_data} =
-          run_round(team_id, debate_id, topic, participants, round_num, round_timeout, session_id)
+    # Run rounds with convergence tracking and possible early-stop
+    {rounds, early_stop_reason} =
+      run_rounds_with_convergence(
+        team_id,
+        debate_id,
+        topic,
+        participants,
+        max_rounds,
+        round_timeout,
+        session_id,
+        policy
+      )
 
-        round_data
-      end)
+    result =
+      tally_and_build_result(
+        team_id,
+        debate_id,
+        topic,
+        participants,
+        rounds,
+        round_timeout,
+        session_id,
+        policy,
+        early_stop_reason
+      )
 
-    result = tally_and_build_result(team_id, debate_id, topic, participants, rounds, round_timeout, session_id)
     {:ok, result}
   end
 
-  # -- Round execution --
+  # -- Round execution with convergence tracking --
+
+  defp run_rounds_with_convergence(
+         team_id,
+         debate_id,
+         topic,
+         participants,
+         max_rounds,
+         timeout,
+         session_id,
+         policy
+       ) do
+    Enum.reduce_while(1..max_rounds, {[], nil}, fn round_num, {rounds_acc, _} ->
+      {:ok, round_data} =
+        run_round(team_id, debate_id, topic, participants, round_num, timeout, session_id)
+
+      # Compute convergence snapshot for this round
+      convergence =
+        compute_round_convergence(team_id, round_data, rounds_acc, participants, policy.scope)
+
+      round_data = Map.put(round_data, :convergence, convergence)
+
+      # Log round summary with convergence delta
+      ConsensusTrail.log_round_summary(
+        debate_id,
+        round_num,
+        round_data,
+        session_id,
+        convergence[:delta]
+      )
+
+      rounds_acc = rounds_acc ++ [round_data]
+
+      cond do
+        # Early-stop: all participants converged on same position
+        convergence.quorum_met ->
+          {:halt, {rounds_acc, :quorum_reached}}
+
+        # Oscillation/deadlock: positions not converging
+        detect_oscillation(rounds_acc) ->
+          {:halt, {rounds_acc, :oscillation_detected}}
+
+        true ->
+          {:cont, {rounds_acc, nil}}
+      end
+    end)
+  end
 
   defp run_round(team_id, debate_id, topic, participants, round_num, timeout, session_id) do
     # Phase 1: Propose
@@ -84,6 +165,9 @@ defmodule Loomkin.Teams.Debate do
     end)
 
     proposals = collect_responses(debate_id, :proposal, participants, timeout)
+
+    # Normalize into structured format (backward-compat: plain text still works)
+    proposals = Enum.map(proposals, &normalize_proposal/1)
 
     # Log proposals to decision graph
     proposal_nodes =
@@ -96,7 +180,12 @@ defmodule Loomkin.Teams.Debate do
             confidence: proposal[:confidence] || 50,
             agent_name: proposal.from,
             session_id: session_id,
-            metadata: %{debate_id: debate_id, round: round_num, phase: "proposal"}
+            metadata: %{
+              debate_id: debate_id,
+              round: round_num,
+              phase: "proposal",
+              structured: Map.has_key?(proposal, :approach)
+            }
           })
 
         Comms.broadcast_decision(team_id, node.id, proposal.from)
@@ -154,18 +243,35 @@ defmodule Loomkin.Teams.Debate do
 
     revisions = collect_responses(debate_id, :revision, participants, timeout)
 
-    {:ok,
-     %{
-       round: round_num,
-       proposals: proposal_nodes,
-       critiques: critiques,
-       revisions: revisions
-     }}
+    # Normalize revisions into structured format
+    revisions = Enum.map(revisions, &normalize_proposal/1)
+
+    # Log revision artifacts to decision graph
+    logged_revisions = ConsensusTrail.log_revisions(revisions, debate_id, round_num, session_id)
+
+    round_data = %{
+      round: round_num,
+      proposals: proposal_nodes,
+      critiques: critiques,
+      revisions: logged_revisions
+    }
+
+    {:ok, round_data}
   end
 
   # -- Voting & result --
 
-  defp tally_and_build_result(team_id, debate_id, topic, participants, rounds, timeout, session_id) do
+  defp tally_and_build_result(
+         team_id,
+         debate_id,
+         topic,
+         participants,
+         rounds,
+         timeout,
+         session_id,
+         policy,
+         early_stop_reason
+       ) do
     # Request votes from all participants
     final_proposals = build_final_proposals(rounds)
 
@@ -179,8 +285,8 @@ defmodule Loomkin.Teams.Debate do
     # Get agent info for weighted voting
     agents = Loomkin.Teams.Context.list_agents(team_id)
 
-    # Use weighted tallying
-    weighted = tally_weighted_votes(votes, agents, topic, "general")
+    # Use weighted tallying with policy scope
+    weighted = tally_weighted_votes(votes, agents, topic, policy.scope)
 
     # Find the winning proposal by weighted winner
     winner_id = weighted.winner
@@ -190,31 +296,75 @@ defmodule Loomkin.Teams.Debate do
         p.from == winner_id || p[:node_id] == winner_id
       end)
 
-    consensus? = weighted.consensus?
+    # Check consensus using policy quorum
+    quorum_met? =
+      ConsensusPolicy.quorum_met?(
+        policy.quorum,
+        weighted.winning_weight_pct,
+        length(votes),
+        length(participants)
+      )
 
-    # Log the winning decision with weight info
-    if winner do
-      {:ok, decision_node} =
-        Graph.add_node(%{
-          node_type: :decision,
-          title: "Debate winner: #{truncate(winner.content, 80)}",
-          description: winner.content,
-          confidence: if(consensus?, do: 90, else: round(weighted.winning_weight_pct)),
-          agent_name: winner.from,
-          session_id: session_id,
-          metadata: %{
-            debate_id: debate_id,
-            votes: vote_map,
-            consensus: consensus?,
-            weighted_tallies: weighted.weighted_tallies,
-            vote_weights: weighted.vote_weights
-          }
-        })
+    # Determine explicit outcome state
+    {outcome, rationale} =
+      determine_outcome(weighted, quorum_met?, early_stop_reason, rounds)
 
-      if winner[:node_id] do
-        Graph.add_edge(winner.node_id, decision_node.id, :leads_to,
-          rationale: "selected by weighted vote"
-        )
+    # Apply deadlock strategy if needed
+    {winner, outcome, rationale} =
+      apply_deadlock_strategy(winner, outcome, rationale, policy, final_proposals)
+
+    consensus? = outcome == :consensus_reached
+
+    # Log the final outcome via ConsensusTrail
+    trail_attrs = %{
+      debate_id: debate_id,
+      topic: topic,
+      winner: winner,
+      consensus?: consensus?,
+      quorum_met?: quorum_met?,
+      policy: policy,
+      weighted: weighted,
+      vote_map: vote_map,
+      session_id: session_id,
+      rounds: rounds,
+      deadlock_reason: unless(consensus?, do: rationale)
+    }
+
+    ConsensusTrail.log_outcome(trail_attrs)
+
+    # Emit collaboration events based on outcome
+    if consensus? do
+      ConsensusTrail.emit_consensus_success(
+        team_id,
+        debate_id,
+        winner,
+        policy,
+        %{
+          weighted_tallies: weighted.weighted_tallies,
+          rounds_completed: length(rounds),
+          outcome: outcome,
+          rationale: rationale
+        }
+      )
+    else
+      # Build escalation payload for deadlocked debates
+      escalation_payload = ConsensusTrail.build_escalation_payload(trail_attrs)
+      competing = escalation_payload.competing_options
+
+      ConsensusTrail.emit_consensus_deadlock(
+        team_id,
+        debate_id,
+        competing,
+        %{
+          rounds_completed: length(rounds),
+          policy: inspect(policy.quorum),
+          outcome: outcome,
+          rationale: rationale
+        }
+      )
+
+      if outcome == :escalated do
+        ConsensusTrail.emit_consensus_escalation(team_id, debate_id, escalation_payload)
       end
     end
 
@@ -223,9 +373,229 @@ defmodule Loomkin.Teams.Debate do
       votes: vote_map,
       rounds: rounds,
       consensus?: consensus?,
+      outcome: outcome,
+      rationale: rationale,
+      policy: policy,
       weighted_tallies: weighted.weighted_tallies,
       vote_weights: weighted.vote_weights
     }
+  end
+
+  # -- Outcome determination --
+
+  defp determine_outcome(weighted, quorum_met?, early_stop_reason, rounds) do
+    cond do
+      # Quorum met via final vote
+      quorum_met? ->
+        {:consensus_reached,
+         "Consensus reached with #{Float.round(weighted.winning_weight_pct, 1)}% weighted support"}
+
+      # Early stop due to quorum reached during rounds (positions fully converged)
+      early_stop_reason == :quorum_reached ->
+        {:consensus_reached,
+         "Consensus reached via early-stop after #{length(rounds)} round(s) — positions fully converged"}
+
+      # Early stop due to oscillation
+      early_stop_reason == :oscillation_detected ->
+        {:deadlock,
+         "Deadlock detected: positions oscillated without convergence over #{length(rounds)} rounds"}
+
+      # All rounds exhausted without consensus
+      true ->
+        {:rounds_exhausted,
+         "Completed #{length(rounds)} rounds without consensus " <>
+           "(#{Float.round(weighted.winning_weight_pct, 1)}% weighted support for winner)"}
+    end
+  end
+
+  # -- Deadlock strategy --
+
+  defp apply_deadlock_strategy(
+         winner,
+         outcome,
+         rationale,
+         %ConsensusPolicy{} = policy,
+         final_proposals
+       )
+       when outcome in [:deadlock, :rounds_exhausted] do
+    case policy.on_deadlock do
+      :leader_decides ->
+        resolved_winner = winner || Enum.at(final_proposals, 0)
+        {resolved_winner, outcome, rationale <> "; resolved by leader_decides policy"}
+
+      :random_tiebreak ->
+        chosen =
+          if final_proposals == [], do: winner, else: Enum.random(final_proposals)
+
+        suffix = if chosen, do: " (chose #{chosen.from}'s proposal)", else: ""
+        {chosen, outcome, rationale <> "; resolved by random_tiebreak policy" <> suffix}
+
+      :escalate_to_user ->
+        {winner, :escalated, rationale <> "; escalating to user per policy"}
+    end
+  end
+
+  defp apply_deadlock_strategy(winner, outcome, rationale, _policy, _proposals) do
+    {winner, outcome, rationale}
+  end
+
+  # -- Structured Proposal Parsing --
+
+  @doc """
+  Normalize a proposal/revision response into the structured contract.
+
+  Accepts both structured maps (with `:approach`, `:scores`, `:tradeoffs`,
+  `:confidence`) and plain-text maps (with only `:content`). Plain-text
+  proposals are wrapped with default fields for backward compatibility.
+  """
+  @spec normalize_proposal(map()) :: map()
+  def normalize_proposal(%{approach: _} = proposal) do
+    # Already structured — ensure all expected keys exist
+    proposal
+    |> Map.put_new(:scores, %{})
+    |> Map.put_new(:tradeoffs, [])
+    |> Map.put_new(:confidence, 50)
+    |> ensure_content_from_approach()
+  end
+
+  def normalize_proposal(%{content: content} = proposal) when is_binary(content) do
+    # Plain-text fallback — try to parse structured data from text
+    case try_parse_structured(content) do
+      {:ok, structured} ->
+        Map.merge(proposal, structured)
+
+      :plain ->
+        proposal
+        |> Map.put_new(:confidence, 50)
+    end
+  end
+
+  def normalize_proposal(%{from: from} = proposal) do
+    proposal
+    |> Map.put_new(:content, Map.get(proposal, :approach, "#{from}'s proposal"))
+    |> Map.put_new(:confidence, 50)
+  end
+
+  def normalize_proposal(proposal), do: Map.put_new(proposal, :confidence, 50)
+
+  defp ensure_content_from_approach(%{content: _} = p), do: p
+  defp ensure_content_from_approach(%{approach: approach} = p), do: Map.put(p, :content, approach)
+
+  defp try_parse_structured(text) do
+    trimmed = String.trim(text)
+
+    cond do
+      String.starts_with?(trimmed, "{") ->
+        case Jason.decode(trimmed) do
+          {:ok, %{"approach" => approach} = parsed} ->
+            {:ok,
+             %{
+               approach: approach,
+               scores: Map.get(parsed, "scores", %{}),
+               tradeoffs: Map.get(parsed, "tradeoffs", []),
+               confidence: Map.get(parsed, "confidence", 50),
+               content: approach
+             }}
+
+          _ ->
+            :plain
+        end
+
+      true ->
+        :plain
+    end
+  end
+
+  # Extract a position key for convergence tracking.
+  # Uses the approach field if structured, otherwise uses the content.
+  defp extract_position_key(%{approach: approach}) when is_binary(approach), do: approach
+
+  defp extract_position_key(%{content: content}) when is_binary(content) do
+    String.slice(content, 0, 100)
+  end
+
+  defp extract_position_key(_), do: "unknown"
+
+  # -- Convergence tracking --
+
+  @doc false
+  def compute_round_convergence(team_id, round_data, prior_rounds, participants, scope) do
+    agents = Loomkin.Teams.Context.list_agents(team_id)
+
+    # Use revisions if available, otherwise proposals
+    current_positions =
+      if round_data.revisions != [] do
+        round_data.revisions
+      else
+        round_data.proposals
+      end
+
+    # Build position summary: which approach each participant is advocating
+    position_map =
+      Map.new(current_positions, fn p ->
+        {p.from, extract_position_key(p)}
+      end)
+
+    # Count how many agree on the same position
+    position_groups = Enum.group_by(position_map, fn {_from, pos} -> pos end)
+
+    largest_group_size =
+      position_groups
+      |> Enum.map(fn {_pos, members} -> length(members) end)
+      |> Enum.max(fn -> 0 end)
+
+    total = length(participants)
+    agreement_pct = if total > 0, do: largest_group_size / total * 100.0, else: 0.0
+
+    # Simulate a "round vote" using position alignment for weighted convergence
+    simulated_votes =
+      Enum.map(current_positions, fn p ->
+        %{
+          from: p.from,
+          choice: extract_position_key(p),
+          confidence: (p[:confidence] || 50) / 100.0
+        }
+      end)
+
+    weighted =
+      if simulated_votes != [] do
+        tally_weighted_votes(simulated_votes, agents, "", scope)
+      else
+        %{winning_weight_pct: 0.0, consensus?: false}
+      end
+
+    # Previous round's top position percentage
+    prior_top_pct =
+      case List.last(prior_rounds) do
+        nil -> 0.0
+        prev -> get_in(prev, [:convergence, :weighted_top_pct]) || 0.0
+      end
+
+    delta = weighted.winning_weight_pct - prior_top_pct
+
+    %{
+      agreement_pct: agreement_pct,
+      weighted_top_pct: weighted.winning_weight_pct,
+      unique_positions: map_size(position_groups),
+      delta: delta,
+      position_groups:
+        Map.new(position_groups, fn {pos, members} -> {pos, length(members)} end),
+      quorum_met: agreement_pct >= 100.0 and length(current_positions) == total and total > 0,
+      stalled: abs(delta) < @convergence_epsilon and length(prior_rounds) > 0
+    }
+  end
+
+  # Detect oscillation: if the last N rounds all have stalled convergence
+  # (top position percentage not changing), it's oscillating/deadlocked.
+  defp detect_oscillation(rounds) when length(rounds) < @oscillation_window, do: false
+
+  defp detect_oscillation(rounds) do
+    last_n = Enum.take(rounds, -@oscillation_window)
+
+    Enum.all?(last_n, fn round ->
+      convergence = round[:convergence] || %{}
+      convergence[:stalled] == true
+    end)
   end
 
   # -- Helpers --

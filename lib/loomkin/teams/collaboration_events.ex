@@ -77,6 +77,69 @@ defmodule Loomkin.Teams.CollaborationEvents do
     })
   end
 
+  @doc "Broadcast when a debate reaches consensus successfully."
+  def consensus_success(team_id, debate_id, winner, policy, metadata) do
+    winner_label =
+      cond do
+        is_map(winner) and is_binary(winner[:content]) -> String.slice(winner.content, 0, 80)
+        is_map(winner) and is_binary(winner[:from]) -> "#{winner.from}'s proposal"
+        true -> "team decision"
+      end
+
+    policy_label = if is_binary(policy_name(policy)), do: " (#{policy_name(policy)})", else: ""
+
+    broadcast_collab(team_id, %{
+      type: :consensus_success,
+      agents: if(is_map(winner), do: [winner[:from] || "system"], else: []),
+      description: "Consensus reached: #{winner_label}#{policy_label}",
+      metadata:
+        Map.merge(metadata || %{}, %{
+          debate_id: debate_id,
+          winner: if(is_map(winner), do: Map.take(winner, [:from, :content, :node_id]), else: nil),
+          policy: policy_name(policy)
+        })
+    })
+  end
+
+  @doc "Broadcast when a debate ends in deadlock (no consensus)."
+  def consensus_deadlock(team_id, debate_id, competing_options, metadata) do
+    option_count = length(competing_options)
+    top_options = Enum.take(competing_options, 2)
+
+    labels =
+      Enum.map(top_options, fn opt ->
+        agent = opt[:agent] || "unknown"
+        score = opt[:weighted_score] || 0.0
+        "#{agent} (#{Float.round(score / 1, 1)})"
+      end)
+
+    broadcast_collab(team_id, %{
+      type: :consensus_deadlock,
+      agents: Enum.map(competing_options, & &1[:agent]) |> Enum.reject(&is_nil/1),
+      description: "Deadlock: #{option_count} competing options — #{Enum.join(labels, " vs ")}",
+      metadata:
+        Map.merge(metadata || %{}, %{
+          debate_id: debate_id,
+          competing_options: competing_options
+        })
+    })
+  end
+
+  @doc "Broadcast when a deadlocked debate is escalated for user intervention."
+  def consensus_escalation(team_id, debate_id, escalation_payload) do
+    action = escalation_payload[:suggested_next_action] || :unknown
+
+    broadcast_collab(team_id, %{
+      type: :consensus_escalation,
+      agents: [],
+      description: "Escalated to user — suggested action: #{action}",
+      metadata: %{
+        debate_id: debate_id,
+        escalation_payload: escalation_payload
+      }
+    })
+  end
+
   @doc "Broadcast when knowledge propagates from a sub-team to a parent team."
   def knowledge_propagated(team_id, source_team_id, discovery_type) do
     broadcast_collab(team_id, %{
@@ -96,6 +159,9 @@ defmodule Loomkin.Teams.CollaborationEvents do
     CollaborationMetrics.record_event(team_id, payload.type)
     Comms.broadcast(team_id, {:collab_event, event})
   end
+
+  defp policy_name(%{quorum: q}), do: "#{q}"
+  defp policy_name(_), do: nil
 
   defp format_agents([]), do: "the team"
   defp format_agents([single]), do: single

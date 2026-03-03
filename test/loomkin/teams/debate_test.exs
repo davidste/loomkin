@@ -175,7 +175,8 @@ defmodule Loomkin.Teams.DebateTest do
       assert result.votes["alice"] == "alice"
       assert result.votes["bob"] == "alice"
       assert result.votes["carol"] == "bob"
-      assert result.consensus? == false
+      # Default policy is :majority — 2/3 votes (66.7%) > 50% threshold
+      assert result.consensus? == true
     end
   end
 end

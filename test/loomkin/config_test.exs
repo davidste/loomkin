@@ -126,6 +126,59 @@ defmodule Loomkin.ConfigTest do
     end
   end
 
+  describe "consensus_policy/0" do
+    test "returns default policy when no config is set" do
+      policy = Loomkin.Config.consensus_policy()
+      assert %Loomkin.Teams.ConsensusPolicy{} = policy
+      assert policy.quorum == :majority
+      assert policy.max_rounds == 3
+      assert policy.scope == "general"
+      assert policy.on_deadlock == :escalate_to_user
+    end
+
+    test "loads policy from [teams.consensus] in .loomkin.toml" do
+      File.mkdir_p!(@test_dir)
+
+      toml_content = """
+      [teams.consensus]
+      quorum = "supermajority"
+      max_rounds = 5
+      scope = "architecture"
+      on_deadlock = "leader_decides"
+      """
+
+      File.write!(Path.join(@test_dir, ".loomkin.toml"), toml_content)
+      Loomkin.Config.load(@test_dir)
+
+      policy = Loomkin.Config.consensus_policy()
+      assert policy.quorum == :supermajority
+      assert policy.max_rounds == 5
+      assert policy.scope == "architecture"
+      assert policy.on_deadlock == :leader_decides
+    after
+      File.rm_rf!(@test_dir)
+    end
+
+    test "falls back to defaults when config has invalid values" do
+      File.mkdir_p!(@test_dir)
+
+      toml_content = """
+      [teams.consensus]
+      quorum = "invalid_mode"
+      max_rounds = -1
+      """
+
+      File.write!(Path.join(@test_dir, ".loomkin.toml"), toml_content)
+      Loomkin.Config.load(@test_dir)
+
+      # Should fall back to default since validation fails
+      policy = Loomkin.Config.consensus_policy()
+      assert policy == Loomkin.Teams.ConsensusPolicy.default()
+    after
+      File.rm_rf!(@test_dir)
+    end
+  end
+
   describe "put/2" do
     test "overrides a config value for the session" do
       Loomkin.Config.put(:model, %{default: "custom:model", editor: "custom:editor"})

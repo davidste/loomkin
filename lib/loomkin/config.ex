@@ -38,6 +38,14 @@ defmodule Loomkin.Config do
       allowlist_enabled: false,
       allowlist: ~w(mix elixir iex git cat head tail ls find grep rg sed awk echo mkdir cp mv touch node npm npx yarn bun cargo rustc go python python3 pip ruby gem)
     },
+    teams: %{
+      consensus: %{
+        quorum: "majority",
+        max_rounds: 3,
+        scope: "general",
+        on_deadlock: "escalate_to_user"
+      }
+    },
     channels: %{
       telegram: %{
         enabled: false,
@@ -107,6 +115,25 @@ defmodule Loomkin.Config do
 
   def defaults, do: @defaults
 
+  @doc """
+  Build a `ConsensusPolicy` struct from the loaded `[teams.consensus]` config.
+
+  Returns the default policy when no config is set or when validation fails.
+  """
+  @spec consensus_policy() :: Loomkin.Teams.ConsensusPolicy.t()
+  def consensus_policy do
+    case get(:teams, :consensus) do
+      %{} = cfg ->
+        case Loomkin.Teams.ConsensusPolicy.from_config(cfg) do
+          {:ok, policy} -> policy
+          {:error, _} -> Loomkin.Teams.ConsensusPolicy.default()
+        end
+
+      _ ->
+        Loomkin.Teams.ConsensusPolicy.default()
+    end
+  end
+
   # --- GenServer callbacks ---
 
   @impl true
@@ -163,6 +190,7 @@ defmodule Loomkin.Config do
     teams budget max_per_team_usd max_per_agent_usd max_per_agent_tokens provider_limits
     models grunt standard expert architect escalation
     templates agents role count
+    consensus quorum max_rounds scope on_deadlock
     telegram discord bot_token webhook_url webhook_path secret_token mode chat_id allowed_chat_ids allow_user_ids guild_ids)a
 
   # Pre-compute a string→atom lookup map so atomize_keys never raises
