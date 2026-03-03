@@ -403,4 +403,70 @@ defmodule LoomkinWeb.TeamActivityComponentTest do
       assert html =~ "line-clamp-3"
     end
   end
+
+  describe "card density and responsiveness" do
+    defp make_dense_event(type, agent, opts) do
+      Map.merge(
+        %{
+          id: Ecto.UUID.generate(),
+          type: type,
+          agent: agent,
+          content: "test content",
+          timestamp: DateTime.utc_now(),
+          metadata: Map.get(opts, :metadata, %{})
+        },
+        opts
+      )
+    end
+
+    defp render_dense_events(events) do
+      render_component(LoomkinWeb.TeamActivityComponent, %{
+        id: "test-activity",
+        team_id: @team_id,
+        events: events,
+        known_agents: Enum.map(events, & &1.agent) |> Enum.uniq()
+      })
+    end
+
+    test "filter bar uses horizontal scroll instead of wrapping" do
+      html = render_dense_events([])
+      assert html =~ "overflow-x-auto"
+    end
+
+    test "card headers use min-w-0 for flex truncation" do
+      html = render_dense_events([make_dense_event(:tool_call, "coder", %{metadata: %{tool_name: "Read"}})])
+      assert html =~ "min-w-0"
+    end
+
+    test "agent names use flex-shrink-0 to prevent collapsing" do
+      html = render_dense_events([make_dense_event(:message, "lead", %{metadata: %{from: "lead"}})])
+      assert html =~ "flex-shrink-0"
+    end
+
+    test "content text uses break-words for narrow viewports" do
+      html = render_dense_events([make_dense_event(:message, "lead", %{content: "A long message", metadata: %{from: "lead"}})])
+      assert html =~ "break-words"
+    end
+
+    test "tool_call file path shows only basename" do
+      html = render_dense_events([make_dense_event(:tool_call, "coder", %{metadata: %{tool_name: "Edit", file_path: "/very/long/path/to/some/deeply/nested/file.ex"}})])
+      # Should show basename, not the full path in the header
+      assert html =~ "file.ex"
+    end
+
+    test "task card with long title truncates" do
+      long_title = String.duplicate("very long task title ", 10)
+      html = render_dense_events([make_dense_event(:task_assigned, "lead", %{metadata: %{title: long_title, owner: "coder"}})])
+      # Title should have truncate class
+      assert html =~ "truncate"
+      assert html =~ "coder"
+    end
+
+    test "error card with long content uses break-words" do
+      long_content = String.duplicate("Error: something went wrong with a very long explanation ", 5)
+      html = render_dense_events([make_dense_event(:error, "coder", %{content: long_content})])
+      # Long error content is shown in body (not header), and uses break-words
+      assert html =~ "break-words"
+    end
+  end
 end

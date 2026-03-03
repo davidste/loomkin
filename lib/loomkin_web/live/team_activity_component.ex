@@ -146,13 +146,13 @@ defmodule LoomkinWeb.TeamActivityComponent do
     <div class="flex flex-col h-full bg-gray-950">
       <%!-- Filter Bar --%>
       <div class="flex flex-col border-b border-gray-800">
-        <%!-- Agent Filters --%>
-        <div class="flex flex-wrap items-center gap-1.5 px-4 py-2">
+        <%!-- Agent Filters — scrollable on narrow viewports --%>
+        <div class="flex items-center gap-1 px-3 py-1.5 overflow-x-auto scrollbar-thin">
           <button
             phx-click="filter_agent"
             phx-value-agent=""
             phx-target={@myself}
-            class={"text-xs px-2.5 py-1 rounded-full font-medium transition #{if @agent_filter == nil, do: "bg-violet-600 text-white", else: "bg-gray-800 text-gray-400 hover:text-gray-200"}"}
+            class={"text-xs px-2 py-0.5 rounded-full font-medium transition flex-shrink-0 #{if @agent_filter == nil, do: "bg-violet-600 text-white", else: "bg-gray-800 text-gray-400 hover:text-gray-200"}"}
           >
             All
           </button>
@@ -161,21 +161,21 @@ defmodule LoomkinWeb.TeamActivityComponent do
             phx-click="filter_agent"
             phx-value-agent={agent}
             phx-target={@myself}
-            class={"flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-medium transition #{if @agent_filter == agent, do: "bg-gray-700 text-white ring-1 ring-gray-600", else: "bg-gray-800 text-gray-400 hover:text-gray-200"}"}
+            class={"flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium transition flex-shrink-0 #{if @agent_filter == agent, do: "bg-gray-700 text-white ring-1 ring-gray-600", else: "bg-gray-800 text-gray-400 hover:text-gray-200"}"}
           >
-            <span class="w-2 h-2 rounded-full flex-shrink-0" style={"background-color: #{agent_color(agent)}"}></span>
+            <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" style={"background-color: #{agent_color(agent)}"}></span>
             {agent}
           </button>
         </div>
 
-        <%!-- Type Filters --%>
-        <div class="flex flex-wrap items-center gap-1.5 px-4 py-1.5 border-t border-gray-800/50">
+        <%!-- Type Filters — scrollable on narrow viewports --%>
+        <div class="flex items-center gap-1 px-3 py-1 border-t border-gray-800/50 overflow-x-auto scrollbar-thin">
           <button
             :for={{type, config} <- type_config_list()}
             phx-click="toggle_type"
             phx-value-type={type}
             phx-target={@myself}
-            class={"text-xs px-2 py-0.5 rounded-full font-medium transition #{if MapSet.size(@type_filter) > 0 && !MapSet.member?(@type_filter, type), do: "opacity-30", else: ""} #{config.bg} #{config.text}"}
+            class={"text-xs px-1.5 py-0.5 rounded-full font-medium transition flex-shrink-0 #{if MapSet.size(@type_filter) > 0 && !MapSet.member?(@type_filter, type), do: "opacity-30", else: ""} #{config.bg} #{config.text}"}
           >
             {config.label}
           </button>
@@ -227,35 +227,34 @@ defmodule LoomkinWeb.TeamActivityComponent do
 
     ~H"""
     <div class="rounded bg-gray-900/50 hover:bg-gray-900/80 transition border-l-2 border-violet-500/40 overflow-hidden">
-      <div class="flex items-center gap-2 px-3 py-1.5">
+      <div class="flex items-center gap-1.5 px-2.5 py-1.5 min-w-0">
         <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" style={"background-color: #{agent_color(@event.agent)}"}></span>
         <button
           phx-click="focus_agent"
           phx-value-agent={@event.agent}
           phx-target={@myself}
-          class="text-xs font-semibold text-gray-300 hover:text-white transition"
+          class="text-xs font-semibold text-gray-300 hover:text-white transition flex-shrink-0"
         >
           {@event.agent}
         </button>
-        <span class="text-xs px-1.5 py-0.5 rounded bg-violet-400/20 text-violet-400 font-medium">
+        <span class="text-xs px-1.5 py-0.5 rounded bg-violet-400/20 text-violet-400 font-medium flex-shrink-0">
           {tool_icon(@tool_name)} {@tool_name}
         </span>
-        <span :if={@file_path} class="text-xs text-gray-500 truncate max-w-[200px]">
-          <button
-            phx-click="inspect_file"
-            phx-value-path={@file_path}
-            phx-target={@myself}
-            class="text-violet-400/70 hover:text-violet-300 font-mono transition"
-          >
-            {Path.basename(@file_path)}
-          </button>
-        </span>
+        <button
+          :if={@file_path}
+          phx-click="inspect_file"
+          phx-value-path={@file_path}
+          phx-target={@myself}
+          class="text-xs text-violet-400/70 hover:text-violet-300 font-mono transition truncate min-w-0"
+        >
+          {Path.basename(@file_path)}
+        </button>
         <span class="text-xs text-gray-600 ml-auto flex-shrink-0">
           {relative_time(@event.timestamp)}
         </span>
       </div>
       <%!-- Collapsible result --%>
-      <div :if={@has_result} class="px-3 pb-1.5">
+      <div :if={@has_result} class="px-2.5 pb-1.5">
         <button
           :if={!@expanded}
           phx-click="expand_event"
@@ -266,7 +265,7 @@ defmodule LoomkinWeb.TeamActivityComponent do
           &#9656; Result ({format_result_size(@result_preview)})
         </button>
         <div :if={@expanded}>
-          <pre class="text-xs text-gray-400 font-mono whitespace-pre-wrap bg-gray-950/50 rounded p-2 max-h-64 overflow-auto mt-1">{@result_preview}</pre>
+          <pre class="text-xs text-gray-400 font-mono whitespace-pre-wrap break-words bg-gray-950/50 rounded p-1.5 max-h-64 overflow-auto mt-1">{@result_preview}</pre>
           <button
             phx-click="expand_event"
             phx-value-id={@event.id}
@@ -278,8 +277,8 @@ defmodule LoomkinWeb.TeamActivityComponent do
         </div>
       </div>
       <%!-- Fallback: show content if no result --%>
-      <div :if={!@has_result && String.length(@event.content) > 0} class="px-3 pb-1.5">
-        <p class="text-xs text-gray-400">{@event.content}</p>
+      <div :if={!@has_result && String.length(@event.content) > 0} class="px-2.5 pb-1.5">
+        <p class="text-xs text-gray-400 break-words">{@event.content}</p>
       </div>
       {reply_button(assign(assigns, :agent, @event.agent))}
     </div>
@@ -307,24 +306,24 @@ defmodule LoomkinWeb.TeamActivityComponent do
 
     ~H"""
     <div class="rounded bg-gray-900/50 hover:bg-gray-900/80 transition border-l-2 border-emerald-500/40 overflow-hidden">
-      <div class="flex items-center gap-2 px-3 py-1.5">
+      <div class="flex items-center gap-1.5 px-2.5 py-1.5 min-w-0">
         <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" style={"background-color: #{agent_color(@event.agent)}"}></span>
         <button
           phx-click="focus_agent"
           phx-value-agent={@from}
           phx-target={@myself}
-          class="text-xs font-semibold text-gray-300 hover:text-white transition"
+          class="text-xs font-semibold text-gray-300 hover:text-white transition flex-shrink-0"
         >
           {@from}
         </button>
-        <span class="text-xs text-gray-600">&#8594;</span>
-        <span class="text-xs font-medium text-emerald-400">{@display_to}</span>
+        <span class="text-xs text-gray-600 flex-shrink-0">&#8594;</span>
+        <span class="text-xs font-medium text-emerald-400 truncate">{@display_to}</span>
         <span class="text-xs text-gray-600 ml-auto flex-shrink-0">
           {relative_time(@event.timestamp)}
         </span>
       </div>
-      <div class="px-3 pb-2">
-        <p class={"text-sm text-gray-300 leading-snug whitespace-pre-wrap #{if @long_content && !@expanded, do: "line-clamp-3"}"}>
+      <div class="px-2.5 pb-1.5">
+        <p class={"text-sm text-gray-300 leading-snug whitespace-pre-wrap break-words #{if @long_content && !@expanded, do: "line-clamp-3"}"}>
           {@content_text}
         </p>
         <button
@@ -372,21 +371,21 @@ defmodule LoomkinWeb.TeamActivityComponent do
 
     ~H"""
     <div class={"rounded hover:bg-gray-900/80 transition border-l-2 #{@config.border} overflow-hidden #{@config.card_bg}"}>
-      <div class="flex items-center gap-2 px-3 py-1.5">
+      <div class="flex items-center gap-1.5 px-2.5 py-1.5 min-w-0">
         <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" style={"background-color: #{agent_color(@event.agent)}"}></span>
         <button
           phx-click="focus_agent"
           phx-value-agent={@event.agent}
           phx-target={@myself}
-          class="text-xs font-semibold text-gray-300 hover:text-white transition"
+          class="text-xs font-semibold text-gray-300 hover:text-white transition flex-shrink-0"
         >
           {@event.agent}
         </button>
-        <span class={"text-xs px-1.5 py-0.5 rounded font-medium #{@config.bg} #{@config.text}"}>
+        <span class={"text-xs px-1.5 py-0.5 rounded font-medium flex-shrink-0 #{@config.bg} #{@config.text}"}>
           {Phoenix.HTML.raw(@config.icon)} {@config.label}
         </span>
-        <span :if={@title} class="text-xs text-gray-300 truncate font-medium">{@title}</span>
-        <span :if={@owner} class="text-xs text-gray-500">
+        <span :if={@title} class="text-xs text-gray-300 truncate min-w-0 font-medium">{@title}</span>
+        <span :if={@owner} class="text-xs text-gray-500 flex-shrink-0">
           &#8594; <span class="text-gray-400">{@owner}</span>
         </span>
         <span class="text-xs text-gray-600 ml-auto flex-shrink-0">
@@ -394,11 +393,11 @@ defmodule LoomkinWeb.TeamActivityComponent do
         </span>
       </div>
       <%!-- Show content only when there is no title (fallback) --%>
-      <div :if={!@title && @event.content != ""} class="px-3 pb-1.5">
-        <p class="text-xs text-gray-400">{@event.content}</p>
+      <div :if={!@title && @event.content != ""} class="px-2.5 pb-1.5">
+        <p class="text-xs text-gray-400 break-words">{@event.content}</p>
       </div>
       <%!-- Collapsible result for completed tasks --%>
-      <div :if={@result && @event.type == :task_complete} class="px-3 pb-1.5">
+      <div :if={@result && @event.type == :task_complete} class="px-2.5 pb-1.5">
         <button
           :if={!@expanded}
           phx-click="expand_event"
@@ -409,7 +408,7 @@ defmodule LoomkinWeb.TeamActivityComponent do
           &#9656; Show result
         </button>
         <div :if={@expanded}>
-          <pre class="text-xs text-gray-400 font-mono whitespace-pre-wrap bg-gray-950/50 rounded p-2 max-h-48 overflow-auto">{@result}</pre>
+          <pre class="text-xs text-gray-400 font-mono whitespace-pre-wrap break-words bg-gray-950/50 rounded p-1.5 max-h-48 overflow-auto">{@result}</pre>
           <button
             phx-click="expand_event"
             phx-value-id={@event.id}
@@ -440,25 +439,25 @@ defmodule LoomkinWeb.TeamActivityComponent do
 
     ~H"""
     <div class="rounded bg-yellow-950/10 hover:bg-yellow-950/20 transition border-l-2 border-yellow-500/40 overflow-hidden">
-      <div class="flex items-center gap-2 px-3 py-1.5">
+      <div class="flex items-center gap-1.5 px-2.5 py-1.5 min-w-0">
         <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" style={"background-color: #{agent_color(@event.agent)}"}></span>
         <button
           phx-click="focus_agent"
           phx-value-agent={@event.agent}
           phx-target={@myself}
-          class="text-xs font-semibold text-gray-300 hover:text-white transition"
+          class="text-xs font-semibold text-gray-300 hover:text-white transition flex-shrink-0"
         >
           {@event.agent}
         </button>
-        <span class="text-xs px-1.5 py-0.5 rounded font-medium bg-yellow-400/20 text-yellow-400">
+        <span class="text-xs px-1.5 py-0.5 rounded font-medium bg-yellow-400/20 text-yellow-400 flex-shrink-0">
           &#11088; discovery
         </span>
         <span class="text-xs text-gray-600 ml-auto flex-shrink-0">
           {relative_time(@event.timestamp)}
         </span>
       </div>
-      <div class="px-3 pb-2">
-        <p class={"text-sm text-yellow-200/80 leading-snug whitespace-pre-wrap #{if @long_content && !@expanded, do: "line-clamp-2"}"}>
+      <div class="px-2.5 pb-1.5">
+        <p class={"text-sm text-yellow-200/80 leading-snug whitespace-pre-wrap break-words #{if @long_content && !@expanded, do: "line-clamp-2"}"}>
           {@content_text}
         </p>
         <button
@@ -492,11 +491,11 @@ defmodule LoomkinWeb.TeamActivityComponent do
 
     ~H"""
     <div class="rounded bg-teal-500/5 border border-teal-500/20 overflow-hidden">
-      <div class="flex items-center gap-2 px-3 py-1.5">
-        <span class="w-2 h-2 rounded-full flex-shrink-0" style={"background-color: #{agent_color(@agent_name)}"}></span>
-        <span class="text-xs font-medium text-teal-300">&#10035; {@agent_name} joined</span>
-        <span :if={@role} class="text-xs text-gray-500">as <span class="text-gray-400">{@role}</span></span>
-        <span :if={@model} class="text-xs text-gray-600 ml-auto">{@model}</span>
+      <div class="flex items-center gap-1.5 px-2.5 py-1 min-w-0">
+        <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" style={"background-color: #{agent_color(@agent_name)}"}></span>
+        <span class="text-xs font-medium text-teal-300 flex-shrink-0">&#10035; {@agent_name} joined</span>
+        <span :if={@role} class="text-xs text-gray-500 truncate">as <span class="text-gray-400">{@role}</span></span>
+        <span :if={@model} class="text-xs text-gray-600 ml-auto flex-shrink-0">{@model}</span>
         <span :if={!@model} class="text-xs text-gray-600 ml-auto flex-shrink-0">
           {relative_time(@event.timestamp)}
         </span>
@@ -524,30 +523,30 @@ defmodule LoomkinWeb.TeamActivityComponent do
 
     ~H"""
     <div class="rounded bg-red-950/30 hover:bg-red-950/50 transition border-l-2 border-red-500/60 overflow-hidden">
-      <div class="flex items-center gap-2 px-3 py-1.5">
+      <div class="flex items-center gap-1.5 px-2.5 py-1.5 min-w-0">
         <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" style={"background-color: #{agent_color(@event.agent)}"}></span>
         <button
           phx-click="focus_agent"
           phx-value-agent={@event.agent}
           phx-target={@myself}
-          class="text-xs font-semibold text-gray-300 hover:text-white transition"
+          class="text-xs font-semibold text-gray-300 hover:text-white transition flex-shrink-0"
         >
           {@event.agent}
         </button>
-        <span class="text-xs px-1.5 py-0.5 rounded font-medium bg-red-400/20 text-red-400">
+        <span class="text-xs px-1.5 py-0.5 rounded font-medium bg-red-400/20 text-red-400 flex-shrink-0">
           &#9888; error
         </span>
-        <span :if={@brief_error && @content_text != ""} class="text-xs text-red-300/80 truncate">{@content_text}</span>
+        <span :if={@brief_error && @content_text != ""} class="text-xs text-red-300/80 truncate min-w-0">{@content_text}</span>
         <span class="text-xs text-gray-600 ml-auto flex-shrink-0">
           {relative_time(@event.timestamp)}
         </span>
       </div>
       <%!-- Full error content if too long for header --%>
-      <div :if={!@brief_error} class="px-3 pb-1.5">
-        <p class="text-xs text-red-300/80">{@content_text}</p>
+      <div :if={!@brief_error} class="px-2.5 pb-1.5">
+        <p class="text-xs text-red-300/80 break-words">{@content_text}</p>
       </div>
       <%!-- Collapsible details (stack trace etc.) --%>
-      <div :if={@details} class="px-3 pb-1.5">
+      <div :if={@details} class="px-2.5 pb-1.5">
         <button
           :if={!@expanded}
           phx-click="expand_event"
@@ -558,7 +557,7 @@ defmodule LoomkinWeb.TeamActivityComponent do
           &#9656; Show details
         </button>
         <div :if={@expanded}>
-          <pre class="text-xs text-red-300/70 font-mono whitespace-pre-wrap bg-gray-950/50 rounded p-2 max-h-48 overflow-auto">{@details}</pre>
+          <pre class="text-xs text-red-300/70 font-mono whitespace-pre-wrap break-words bg-gray-950/50 rounded p-1.5 max-h-48 overflow-auto">{@details}</pre>
           <button
             phx-click="expand_event"
             phx-value-id={@event.id}
@@ -588,13 +587,13 @@ defmodule LoomkinWeb.TeamActivityComponent do
 
     ~H"""
     <div class={"rounded bg-gray-900/40 transition border-l-2 border-indigo-500/30 overflow-hidden #{if @is_live, do: "ring-1 ring-indigo-500/20 animate-pulse-subtle"}"}>
-      <div class="flex items-center gap-2 px-3 py-1.5">
+      <div class="flex items-center gap-1.5 px-2.5 py-1.5 min-w-0">
         <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" style={"background-color: #{agent_color(@event.agent)}"}></span>
         <button
           phx-click="focus_agent"
           phx-value-agent={@event.agent}
           phx-target={@myself}
-          class="text-xs font-semibold text-gray-400 hover:text-white transition"
+          class="text-xs font-semibold text-gray-400 hover:text-white transition flex-shrink-0"
         >
           {@event.agent}
         </button>
@@ -603,8 +602,8 @@ defmodule LoomkinWeb.TeamActivityComponent do
           {relative_time(@event.timestamp)}
         </span>
       </div>
-      <div :if={@streaming_content || @event.content != ""} class="px-3 pb-1.5">
-        <p class="text-xs text-gray-500 leading-snug whitespace-pre-wrap line-clamp-2">
+      <div :if={@streaming_content || @event.content != ""} class="px-2.5 pb-1.5">
+        <p class="text-xs text-gray-500 leading-snug whitespace-pre-wrap break-words line-clamp-2">
           {@streaming_content || @event.content}<span :if={@is_live} class="inline-block w-1 h-3 bg-indigo-400 animate-pulse ml-0.5 align-text-bottom"></span>
         </p>
       </div>
@@ -626,22 +625,22 @@ defmodule LoomkinWeb.TeamActivityComponent do
 
     ~H"""
     <div class="rounded bg-gray-900/50 hover:bg-gray-900/80 transition border-l-2 border-amber-500/40 overflow-hidden">
-      <div class="flex items-center gap-2 px-3 py-1.5">
+      <div class="flex items-center gap-1.5 px-2.5 py-1.5 min-w-0">
         <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" style={"background-color: #{agent_color(@event.agent)}"}></span>
         <button
           phx-click="focus_agent"
           phx-value-agent={@event.agent}
           phx-target={@myself}
-          class="text-xs font-semibold text-gray-300 hover:text-white transition"
+          class="text-xs font-semibold text-gray-300 hover:text-white transition flex-shrink-0"
         >
           {@event.agent}
         </button>
-        <span class="text-xs px-1.5 py-0.5 rounded font-medium bg-amber-400/20 text-amber-400">
+        <span class="text-xs px-1.5 py-0.5 rounded font-medium bg-amber-400/20 text-amber-400 flex-shrink-0">
           &#128230; offload
         </span>
-        <span class="text-xs text-gray-400">{@event.content}</span>
-        <span :if={@topic} class="text-xs text-amber-400/60">({@topic})</span>
-        <span :if={@token_count} class="text-xs text-gray-600">{format_tokens(@token_count)} tok</span>
+        <span class="text-xs text-gray-400 truncate min-w-0">{@event.content}</span>
+        <span :if={@topic} class="text-xs text-amber-400/60 flex-shrink-0">({@topic})</span>
+        <span :if={@token_count} class="text-xs text-gray-600 flex-shrink-0">{format_tokens(@token_count)} tok</span>
         <span class="text-xs text-gray-600 ml-auto flex-shrink-0">
           {relative_time(@event.timestamp)}
         </span>
@@ -663,25 +662,25 @@ defmodule LoomkinWeb.TeamActivityComponent do
 
     ~H"""
     <div class="rounded bg-sky-950/15 hover:bg-sky-950/25 transition border-l-2 border-sky-500/50 overflow-hidden">
-      <div class="flex items-center gap-2 px-3 py-1.5">
+      <div class="flex items-center gap-1.5 px-2.5 py-1.5 min-w-0">
         <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" style={"background-color: #{agent_color(@event.agent)}"}></span>
         <button
           phx-click="focus_agent"
           phx-value-agent={@from}
           phx-target={@myself}
-          class="text-xs font-semibold text-gray-300 hover:text-white transition"
+          class="text-xs font-semibold text-gray-300 hover:text-white transition flex-shrink-0"
         >
           {@from}
         </button>
-        <span class="text-xs px-1.5 py-0.5 rounded font-medium bg-sky-400/20 text-sky-400">
+        <span class="text-xs px-1.5 py-0.5 rounded font-medium bg-sky-400/20 text-sky-400 flex-shrink-0">
           &#10068; question
         </span>
         <span class="text-xs text-gray-600 ml-auto flex-shrink-0">
           {relative_time(@event.timestamp)}
         </span>
       </div>
-      <div class="px-3 pb-2">
-        <p class="text-sm text-sky-200/80 leading-snug whitespace-pre-wrap">{@event.content}</p>
+      <div class="px-2.5 pb-1.5">
+        <p class="text-sm text-sky-200/80 leading-snug whitespace-pre-wrap break-words">{@event.content}</p>
       </div>
       {reply_button(assign(assigns, :agent, @from))}
     </div>
@@ -702,27 +701,27 @@ defmodule LoomkinWeb.TeamActivityComponent do
 
     ~H"""
     <div class="rounded bg-gray-900/50 hover:bg-gray-900/80 transition border-l-2 border-sky-500/40 overflow-hidden">
-      <div class="flex items-center gap-2 px-3 py-1.5">
+      <div class="flex items-center gap-1.5 px-2.5 py-1.5 min-w-0">
         <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" style={"background-color: #{agent_color(@event.agent)}"}></span>
         <button
           phx-click="focus_agent"
           phx-value-agent={@from}
           phx-target={@myself}
-          class="text-xs font-semibold text-gray-300 hover:text-white transition"
+          class="text-xs font-semibold text-gray-300 hover:text-white transition flex-shrink-0"
         >
           {@from}
         </button>
-        <span class="text-xs text-gray-600">&#8594;</span>
-        <span :if={@to} class="text-xs font-medium text-sky-400">{@to}</span>
-        <span class="text-xs px-1.5 py-0.5 rounded font-medium bg-sky-400/20 text-sky-400">
+        <span class="text-xs text-gray-600 flex-shrink-0">&#8594;</span>
+        <span :if={@to} class="text-xs font-medium text-sky-400 truncate">{@to}</span>
+        <span class="text-xs px-1.5 py-0.5 rounded font-medium bg-sky-400/20 text-sky-400 flex-shrink-0">
           &#10069; answer
         </span>
         <span class="text-xs text-gray-600 ml-auto flex-shrink-0">
           {relative_time(@event.timestamp)}
         </span>
       </div>
-      <div class="px-3 pb-2">
-        <p class="text-sm text-gray-300 leading-snug whitespace-pre-wrap">{@event.content}</p>
+      <div class="px-2.5 pb-1.5">
+        <p class="text-sm text-gray-300 leading-snug whitespace-pre-wrap break-words">{@event.content}</p>
       </div>
       {reply_button(assign(assigns, :agent, @from))}
     </div>
@@ -743,20 +742,20 @@ defmodule LoomkinWeb.TeamActivityComponent do
 
     ~H"""
     <div class="rounded bg-gray-900/50 hover:bg-gray-900/80 transition border-l-2 border-cyan-500/40 overflow-hidden">
-      <div class="flex items-center gap-2 px-3 py-1.5">
+      <div class="flex items-center gap-1.5 px-2.5 py-1.5 min-w-0">
         <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" style={"background-color: #{agent_color(@event.agent)}"}></span>
-        <span class="text-xs font-semibold text-gray-300">
+        <span class="text-xs font-semibold text-gray-300 flex-shrink-0">
           {@event.agent}
         </span>
-        <span class="text-xs px-1.5 py-0.5 rounded font-medium bg-cyan-400/20 text-cyan-400">
+        <span class="text-xs px-1.5 py-0.5 rounded font-medium bg-cyan-400/20 text-cyan-400 flex-shrink-0">
           {channel_icon(@channel)} {if @direction == :inbound, do: "received", else: "sent"}
         </span>
         <span class="text-xs text-gray-600 ml-auto flex-shrink-0">
           {relative_time(@event.timestamp)}
         </span>
       </div>
-      <div class="px-3 pb-2">
-        <p class="text-sm text-gray-300 leading-snug whitespace-pre-wrap">{@event.content}</p>
+      <div class="px-2.5 pb-1.5">
+        <p class="text-sm text-gray-300 leading-snug whitespace-pre-wrap break-words">{@event.content}</p>
       </div>
       {reply_button(assign(assigns, :agent, @event.agent))}
     </div>
@@ -776,25 +775,25 @@ defmodule LoomkinWeb.TeamActivityComponent do
 
     ~H"""
     <div class={"rounded hover:bg-gray-900/80 transition border-l-2 #{@config.border} overflow-hidden #{@config.card_bg}"}>
-      <div class="flex items-center gap-2 px-3 py-1.5">
+      <div class="flex items-center gap-1.5 px-2.5 py-1.5 min-w-0">
         <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" style={"background-color: #{agent_color(@event.agent)}"}></span>
         <button
           phx-click="focus_agent"
           phx-value-agent={@event.agent}
           phx-target={@myself}
-          class="text-xs font-semibold text-gray-300 hover:text-white transition"
+          class="text-xs font-semibold text-gray-300 hover:text-white transition flex-shrink-0"
         >
           {@event.agent}
         </button>
-        <span class={"text-xs px-1.5 py-0.5 rounded font-medium #{@config.bg} #{@config.text}"}>
+        <span class={"text-xs px-1.5 py-0.5 rounded font-medium flex-shrink-0 #{@config.bg} #{@config.text}"}>
           {Phoenix.HTML.raw(@config.icon)} {@config.label}
         </span>
         <span class="text-xs text-gray-600 ml-auto flex-shrink-0">
           {relative_time(@event.timestamp)}
         </span>
       </div>
-      <div class="px-3 pb-1.5">
-        <p class={"text-xs text-gray-400 leading-snug #{if !@expanded, do: "line-clamp-3"}"}>
+      <div class="px-2.5 pb-1.5">
+        <p class={"text-xs text-gray-400 leading-snug break-words #{if !@expanded, do: "line-clamp-3"}"}>
           {@event.content}
         </p>
         <button
@@ -820,7 +819,7 @@ defmodule LoomkinWeb.TeamActivityComponent do
       :if={@agent != "You" && @agent != "system"}
       phx-click="reply_to_agent"
       phx-value-agent={@agent}
-      class="flex items-center gap-1 text-xs text-gray-500/60 hover:text-emerald-400 transition px-3 pb-1.5"
+      class="flex items-center gap-1 text-xs text-gray-500/60 hover:text-emerald-400 transition px-2.5 pb-1"
       title={"Reply to #{@agent}"}
     >
       <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
