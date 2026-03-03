@@ -10,4 +10,7 @@ defmodule Loomkin.Channels.TelegexBehaviour do
 
   @callback answer_callback_query(callback_query_id :: String.t()) ::
               {:ok, boolean()} | {:error, term()}
+
+  @callback get_updates(opts :: keyword()) ::
+              {:ok, [map()]} | {:error, term()}
 end

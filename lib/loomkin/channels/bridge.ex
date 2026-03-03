@@ -133,9 +133,14 @@ defmodule Loomkin.Channels.Bridge do
     if should_notify?(msg, state) do
       agent_name = Map.get(payload, :agent_name, "unknown")
       error = Map.get(payload, :error, "unknown error")
+      team_id = state.binding.team_id
 
       send_if_allowed(state, fn ->
-        state.adapter.send_text(state.binding, "[#{agent_name}] Error: #{error}", [])
+        state.adapter.send_text(
+          state.binding,
+          "[#{agent_name}] Error: #{error}\nTeam: `#{team_id}`",
+          []
+        )
       end)
     else
       {:noreply, state}
@@ -144,8 +149,14 @@ defmodule Loomkin.Channels.Bridge do
 
   def handle_info(:team_dissolved = msg, state) do
     if should_notify?(msg, state) do
+      team_id = state.binding.team_id
+
       send_if_allowed(state, fn ->
-        state.adapter.send_text(state.binding, "Team has been dissolved.", [])
+        state.adapter.send_text(
+          state.binding,
+          "Team `#{team_id}` has been dissolved.",
+          []
+        )
       end)
     else
       {:noreply, state}
@@ -204,7 +215,8 @@ defmodule Loomkin.Channels.Bridge do
         )
 
       text =
-        "Permission request [#{request_id}]: #{agent_name} wants to run #{tool_name} on #{tool_path}\n" <>
+        "Permission request `#{request_id}`: #{agent_name} wants to run #{tool_name} on #{tool_path}\n" <>
+          "Team: `#{team_id}`\n" <>
           "Reply: /approve #{request_id} once|always|deny"
 
       send_if_allowed(state, fn ->
@@ -223,7 +235,11 @@ defmodule Loomkin.Channels.Bridge do
       limit = Map.get(payload, :limit, 0)
       threshold = Map.get(payload, :threshold, 0)
 
-      text = "Budget warning: $#{Float.round(spent / 1, 4)} spent of $#{Float.round(limit / 1, 4)} limit (#{threshold}% threshold)"
+      team_id = state.binding.team_id
+
+      text =
+        "Budget warning: $#{Float.round(spent / 1, 4)} spent of $#{Float.round(limit / 1, 4)} limit (#{threshold}% threshold)\n" <>
+          "Team: `#{team_id}`"
 
       send_if_allowed(state, fn ->
         state.adapter.send_text(state.binding, text, [])
@@ -269,10 +285,11 @@ defmodule Loomkin.Channels.Bridge do
 
   # --- Session event handlers ---
 
-  def handle_info({:permission_request, _session_id, tool_name, tool_path, :session} = msg, state) do
+  def handle_info({:permission_request, session_id, tool_name, tool_path, :session} = msg, state) do
     if should_notify?(msg, state) do
       text =
         "Session permission request: tool #{tool_name} on #{tool_path}\n" <>
+          "Session: `#{session_id}`\n" <>
           "Approve via the web UI or /perm command."
 
       send_if_allowed(state, fn ->
@@ -303,7 +320,7 @@ defmodule Loomkin.Channels.Bridge do
   def handle_info({:session_cancelled, session_id} = msg, state) do
     if should_notify?(msg, state) do
       send_if_allowed(state, fn ->
-        state.adapter.send_text(state.binding, "Session #{session_id} cancelled.", [])
+        state.adapter.send_text(state.binding, "Session `#{session_id}` cancelled.", [])
       end)
     else
       {:noreply, state}
@@ -320,10 +337,12 @@ defmodule Loomkin.Channels.Bridge do
     end
   end
 
-  def handle_info({:session_status, _session_id, status} = msg, state) do
+  def handle_info({:session_status, _session_id, status} = msg, %{binding: binding} = state) do
     if should_notify?(msg, state) do
+      session_id = elem(msg, 1)
+
       send_if_allowed(state, fn ->
-        state.adapter.send_text(state.binding, "Session status: #{status}", [])
+        state.adapter.send_text(binding, "Session `#{session_id}` status: #{status}", [])
       end)
     else
       {:noreply, state}
@@ -333,7 +352,7 @@ defmodule Loomkin.Channels.Bridge do
   def handle_info({:team_available, _session_id, team_id} = msg, state) do
     if should_notify?(msg, state) do
       send_if_allowed(state, fn ->
-        state.adapter.send_text(state.binding, "Team #{team_id} is now available.", [])
+        state.adapter.send_text(state.binding, "Team `#{team_id}` is now available.", [])
       end)
     else
       {:noreply, state}
@@ -343,7 +362,7 @@ defmodule Loomkin.Channels.Bridge do
   def handle_info({:child_team_available, _session_id, child_team_id} = msg, state) do
     if should_notify?(msg, state) do
       send_if_allowed(state, fn ->
-        state.adapter.send_text(state.binding, "Child team #{child_team_id} spawned.", [])
+        state.adapter.send_text(state.binding, "Child team `#{child_team_id}` spawned.", [])
       end)
     else
       {:noreply, state}

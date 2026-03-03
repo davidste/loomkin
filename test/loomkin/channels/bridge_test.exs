@@ -49,7 +49,8 @@ defmodule Loomkin.Channels.BridgeTest do
 
     test "subscribes to team PubSub topics", %{team_id: team_id, pid: pid} do
       expect(Loomkin.MockAdapter, :send_text, fn _binding, text, _opts ->
-        assert text =~ "Team has been dissolved"
+        assert text =~ "has been dissolved"
+        assert text =~ team_id
         :ok
       end)
 
@@ -108,7 +109,7 @@ defmodule Loomkin.Channels.BridgeTest do
       assert state.pending_questions["q-1"] == %{agent_name: "researcher"}
     end
 
-    test "forwards agent_error to adapter", %{pid: pid} do
+    test "forwards agent_error to adapter with team_id", %{pid: pid, team_id: team_id} do
       test_pid = self()
 
       expect(Loomkin.MockAdapter, :send_text, fn _binding, text, _opts ->
@@ -121,9 +122,10 @@ defmodule Loomkin.Channels.BridgeTest do
       assert_receive {:text_sent, text}, 500
       assert text =~ "coder"
       assert text =~ "timeout"
+      assert text =~ "`#{team_id}`"
     end
 
-    test "forwards team_dissolved to adapter", %{pid: pid} do
+    test "forwards team_dissolved to adapter with team_id", %{pid: pid, team_id: team_id} do
       test_pid = self()
 
       expect(Loomkin.MockAdapter, :send_text, fn _binding, text, _opts ->
@@ -133,7 +135,9 @@ defmodule Loomkin.Channels.BridgeTest do
 
       send(pid, :team_dissolved)
 
-      assert_receive {:text_sent, "Team has been dissolved."}, 500
+      assert_receive {:text_sent, text}, 500
+      assert text =~ "has been dissolved"
+      assert text =~ "`#{team_id}`"
     end
 
     test "forwards assistant messages to adapter", %{pid: pid} do
@@ -230,7 +234,7 @@ defmodule Loomkin.Channels.BridgeTest do
   end
 
   describe "telemetry event forwarding" do
-    test "forwards team_budget_warning", %{pid: pid} do
+    test "forwards team_budget_warning with team_id", %{pid: pid, team_id: team_id} do
       test_pid = self()
 
       expect(Loomkin.MockAdapter, :send_text, fn _binding, text, _opts ->
@@ -243,6 +247,7 @@ defmodule Loomkin.Channels.BridgeTest do
       assert_receive {:text_sent, text}, 500
       assert text =~ "Budget warning"
       assert text =~ "80%"
+      assert text =~ "`#{team_id}`"
     end
 
     test "forwards team_escalation", %{pid: pid} do
@@ -280,7 +285,7 @@ defmodule Loomkin.Channels.BridgeTest do
   end
 
   describe "session event forwarding" do
-    test "forwards session_cancelled", %{pid: pid} do
+    test "forwards session_cancelled with monospace session_id", %{pid: pid} do
       test_pid = self()
 
       expect(Loomkin.MockAdapter, :send_text, fn _binding, text, _opts ->
@@ -291,7 +296,7 @@ defmodule Loomkin.Channels.BridgeTest do
       send(pid, {:session_cancelled, "sess-1"})
 
       assert_receive {:text_sent, text}, 500
-      assert text =~ "sess-1"
+      assert text =~ "`sess-1`"
       assert text =~ "cancelled"
     end
 

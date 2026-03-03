@@ -43,7 +43,14 @@ defmodule Loomkin.Config do
         enabled: false,
         bot_token: nil,
         webhook_url: nil,
+        # Path where the webhook is mounted in Phoenix router — must match router.ex.
+        # Used when registering the webhook with Telegram via Telegex.set_webhook/1.
+        webhook_path: "/api/webhooks/telegram",
         secret_token: nil,
+        # "webhook" (default) or "polling" for local dev without ngrok
+        mode: "webhook",
+        # When set, auto-creates a binding for this chat on startup
+        chat_id: nil,
         allowed_chat_ids: [],
         allow_user_ids: []
       },
@@ -156,7 +163,7 @@ defmodule Loomkin.Config do
     teams budget max_per_team_usd max_per_agent_usd max_per_agent_tokens provider_limits
     models grunt standard expert architect escalation
     templates agents role count
-    telegram discord bot_token webhook_url secret_token allowed_chat_ids allow_user_ids guild_ids)a
+    telegram discord bot_token webhook_url webhook_path secret_token mode chat_id allowed_chat_ids allow_user_ids guild_ids)a
 
   # Pre-compute a string→atom lookup map so atomize_keys never raises
   @known_key_map Map.new(@known_keys, fn atom -> {Atom.to_string(atom), atom} end)
