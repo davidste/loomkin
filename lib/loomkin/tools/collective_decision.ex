@@ -22,7 +22,7 @@ defmodule Loomkin.Tools.CollectiveDecision do
   import Loomkin.Tool, only: [param!: 2, param: 3]
 
   alias Loomkin.Decisions.Graph
-  alias Loomkin.Teams.{Comms, Context}
+  alias Loomkin.Teams.{Comms, ConsensusPolicy, Context}
 
   @vote_timeout_ms 30_000
 
@@ -31,8 +31,11 @@ defmodule Loomkin.Tools.CollectiveDecision do
     team_id = param!(params, :team_id)
     topic = param!(params, :topic)
     options = param!(params, :options)
-    scope = param(params, :scope, "general")
     from = param!(context, :agent_name)
+
+    # Load policy from config, use scope param as override
+    policy = Loomkin.Config.consensus_policy()
+    scope = param(params, :scope, policy.scope)
 
     agents = Context.list_agents(team_id)
 
@@ -64,13 +67,24 @@ defmodule Loomkin.Tools.CollectiveDecision do
         scope
       )
 
+      # Check quorum using policy
+      consensus? =
+        ConsensusPolicy.quorum_met?(
+          policy.quorum,
+          result.winning_weight_pct,
+          length(votes),
+          length(agents)
+        )
+
+      result = Map.put(result, :consensus?, consensus?)
+
       # Log to decision graph
       {:ok, node} =
         Graph.add_node(%{
           node_type: :decision,
           title: "Collective decision: #{truncate(topic, 80)}",
           description: topic,
-          confidence: if(result.consensus?, do: 90, else: round(result.winning_weight_pct)),
+          confidence: if(consensus?, do: 90, else: round(result.winning_weight_pct)),
           agent_name: to_string(from),
           metadata: %{
             "vote_id" => vote_id,
@@ -80,7 +94,9 @@ defmodule Loomkin.Tools.CollectiveDecision do
             "weighted_tallies" => result.weighted_tallies,
             "vote_weights" => result.vote_weights,
             "winner" => result.winner,
-            "consensus" => result.consensus?,
+            "consensus" => consensus?,
+            "quorum" => to_string(policy.quorum),
+            "on_deadlock" => to_string(policy.on_deadlock),
             "team_id" => team_id
           }
         })

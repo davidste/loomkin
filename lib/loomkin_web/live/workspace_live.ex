@@ -2166,6 +2166,9 @@ defmodule LoomkinWeb.WorkspaceLive do
       case payload.type do
         :conflict_detected -> :error
         :consensus_reached -> :decision
+        :consensus_success -> :decision
+        :consensus_deadlock -> :error
+        :consensus_escalation -> :error
         :task_rebalanced -> :task_assigned
         _ -> :message
       end
