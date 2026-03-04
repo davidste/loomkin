@@ -59,9 +59,8 @@ defmodule Loomkin.Providers.AnthropicOAuth do
 
   @impl ReqLLM.Provider
   def prepare_request(:chat, model_spec, prompt, opts) do
-    oauth_token = fetch_token!()
-
-    with {:ok, model} <- resolve_model(model_spec),
+    with {:ok, oauth_token} <- fetch_token(),
+         {:ok, model} <- resolve_model(model_spec),
          {:ok, context} <- ReqLLM.Context.normalize(prompt, opts),
          opts_with_context = Keyword.put(opts, :context, context),
          opts_with_key = Keyword.put(opts_with_context, :api_key, oauth_token),
@@ -144,7 +143,17 @@ defmodule Loomkin.Providers.AnthropicOAuth do
 
   @impl ReqLLM.Provider
   def attach(request, model, user_opts) do
-    oauth_token = Keyword.get(user_opts, :api_key) || fetch_token!()
+    oauth_token =
+      case Keyword.get(user_opts, :api_key) do
+        nil ->
+          case fetch_token() do
+            {:ok, token} -> token
+            {:error, _} -> raise "No OAuth token available for Anthropic. Connect via Settings."
+          end
+
+        token ->
+          token
+      end
 
     extra_option_keys = [
       :model,
@@ -208,7 +217,17 @@ defmodule Loomkin.Providers.AnthropicOAuth do
 
   @impl ReqLLM.Provider
   def attach_stream(model, context, opts, _finch_name) do
-    oauth_token = Keyword.get(opts, :api_key) || fetch_token!()
+    oauth_token =
+      case Keyword.get(opts, :api_key) do
+        nil ->
+          case fetch_token() do
+            {:ok, token} -> token
+            {:error, _} -> raise "No OAuth token available for Anthropic. Connect via Settings."
+          end
+
+        token ->
+          token
+      end
 
     {provider_options, standard_opts} = Keyword.pop(opts, :provider_options, [])
     flattened_opts = Keyword.merge(standard_opts, provider_options)
@@ -266,14 +285,10 @@ defmodule Loomkin.Providers.AnthropicOAuth do
 
   # ── Internal helpers ────────────────────────────────────────────────
 
-  defp fetch_token! do
+  defp fetch_token do
     case TokenStore.get_access_token(:anthropic) do
-      nil ->
-        raise RuntimeError,
-          message: "No OAuth token available for Anthropic. Connect via Settings."
-
-      token ->
-        token
+      nil -> {:error, :no_oauth_token}
+      token -> {:ok, token}
     end
   end
 

@@ -14,9 +14,6 @@ defmodule Loomkin.Application do
     # Create ETS table for Plug session store (must exist before endpoint starts)
     :ets.new(:loomkin_sessions, [:named_table, :public, :set])
 
-    # Register custom OAuth provider with ReqLLM
-    register_oauth_providers()
-
     children =
       [
         # Storage
@@ -63,6 +60,11 @@ defmodule Loomkin.Application do
       ] ++
         maybe_start_mcp_server() ++
         maybe_start_endpoint()
+
+    # Register custom OAuth providers with ReqLLM (before supervisor starts,
+    # but after children list is defined — providers only call ReqLLM.Providers.register!
+    # which has no runtime dependencies on the supervision tree)
+    register_oauth_providers()
 
     opts = [strategy: :one_for_one, name: Loomkin.Supervisor]
     Supervisor.start_link(children, opts)

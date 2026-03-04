@@ -50,7 +50,7 @@ defmodule Loomkin.Auth.Provider do
 
   Returns the full URL to redirect the browser to.
   """
-  @callback build_authorize_url(params :: map()) :: String.t()
+  @callback build_authorize_url(params :: map()) :: {:ok, String.t()} | {:error, term()}
 
   @doc """
   Exchange an authorization code for tokens.

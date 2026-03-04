@@ -13,7 +13,10 @@ defmodule LoomkinWeb.ModelSelectorComponent do
        show_unconfigured: false,
        active_providers: active,
        unconfigured_providers: unconfigured,
-       all_providers: all
+       all_providers: all,
+       paste_back_provider: nil,
+       paste_back_error: nil,
+       paste_back_submitting: false
      )}
   end
 
@@ -548,6 +551,15 @@ defmodule LoomkinWeb.ModelSelectorComponent do
               })
 
             {:noreply, socket}
+
+          {:error, _reason} ->
+            {:noreply,
+             assign(socket,
+               paste_back_provider: provider_atom,
+               paste_back_error: "Failed to start OAuth flow. Please try again.",
+               paste_back_submitting: false,
+               open: false
+             )}
         end
 
       :redirect ->
@@ -626,8 +638,15 @@ defmodule LoomkinWeb.ModelSelectorComponent do
 
   defp current_provider(model) when is_binary(model) do
     case String.split(model, ":", parts: 2) do
-      [provider, _] -> String.to_atom(provider)
-      _ -> nil
+      [provider, _] ->
+        try do
+          String.to_existing_atom(provider)
+        rescue
+          ArgumentError -> nil
+        end
+
+      _ ->
+        nil
     end
   end
 

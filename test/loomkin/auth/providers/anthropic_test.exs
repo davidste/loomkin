@@ -66,7 +66,7 @@ defmodule Loomkin.Auth.Providers.AnthropicTest do
 
   describe "build_authorize_url/1" do
     test "includes all required query parameters" do
-      url =
+      {:ok, url} =
         Anthropic.build_authorize_url(%{
           state: "test_state_123",
           code_verifier: "test_verifier_abcdefghijklmnop1234567890abcdef"
@@ -85,7 +85,7 @@ defmodule Loomkin.Auth.Providers.AnthropicTest do
     end
 
     test "uses max mode URL by default" do
-      url =
+      {:ok, url} =
         Anthropic.build_authorize_url(%{
           state: "s",
           code_verifier: "v_abcdefghijklmnop1234567890abcdef1234567"
@@ -96,7 +96,7 @@ defmodule Loomkin.Auth.Providers.AnthropicTest do
     end
 
     test "respects mode override in params" do
-      url =
+      {:ok, url} =
         Anthropic.build_authorize_url(%{
           state: "s",
           code_verifier: "v_abcdefghijklmnop1234567890abcdef1234567",
@@ -109,7 +109,7 @@ defmodule Loomkin.Auth.Providers.AnthropicTest do
     test "code_challenge is derived from code_verifier (S256)" do
       verifier = "test_verifier_abcdefghijklmnop1234567890abcdef"
 
-      url = Anthropic.build_authorize_url(%{state: "s", code_verifier: verifier})
+      {:ok, url} = Anthropic.build_authorize_url(%{state: "s", code_verifier: verifier})
 
       expected_challenge =
         :crypto.hash(:sha256, verifier) |> Base.url_encode64(padding: false)

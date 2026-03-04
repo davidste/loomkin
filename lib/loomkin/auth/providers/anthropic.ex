@@ -118,7 +118,7 @@ defmodule Loomkin.Auth.Providers.Anthropic do
       |> Enum.reject(fn {_k, v} -> is_nil(v) or v == "" end)
       |> URI.encode_query()
 
-    "#{authorize_url_for_mode(current_mode)}?#{query}"
+    {:ok, "#{authorize_url_for_mode(current_mode)}?#{query}"}
   end
 
   @impl true

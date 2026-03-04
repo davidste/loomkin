@@ -96,7 +96,7 @@ defmodule Loomkin.Auth.Providers.OpenAI do
       ]
       |> URI.encode_query()
 
-    "#{authorize_url()}?#{query}"
+    {:ok, "#{authorize_url()}?#{query}"}
   end
 
   @impl true

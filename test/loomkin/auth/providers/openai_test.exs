@@ -49,7 +49,7 @@ defmodule Loomkin.Auth.Providers.OpenAITest do
     end
 
     test "includes all standard OAuth2 query parameters", %{params: params} do
-      url = OpenAI.build_authorize_url(params)
+      {:ok, url} = OpenAI.build_authorize_url(params)
       query = url |> URI.parse() |> Map.get(:query) |> URI.decode_query()
 
       assert query["response_type"] == "code"
@@ -62,9 +62,10 @@ defmodule Loomkin.Auth.Providers.OpenAITest do
     end
 
     test "includes Codex-specific parameters", %{params: params} do
+      {:ok, url} = OpenAI.build_authorize_url(params)
+
       query =
-        params
-        |> OpenAI.build_authorize_url()
+        url
         |> URI.parse()
         |> Map.get(:query)
         |> URI.decode_query()
@@ -75,7 +76,7 @@ defmodule Loomkin.Auth.Providers.OpenAITest do
     end
 
     test "code_challenge is derived from code_verifier (S256)", %{params: params} do
-      url = OpenAI.build_authorize_url(params)
+      {:ok, url} = OpenAI.build_authorize_url(params)
       query = url |> URI.parse() |> Map.get(:query) |> URI.decode_query()
 
       expected_challenge =
@@ -86,9 +87,10 @@ defmodule Loomkin.Auth.Providers.OpenAITest do
     end
 
     test "scope joins all default scopes with space", %{params: params} do
+      {:ok, url} = OpenAI.build_authorize_url(params)
+
       query =
-        params
-        |> OpenAI.build_authorize_url()
+        url
         |> URI.parse()
         |> Map.get(:query)
         |> URI.decode_query()
@@ -101,7 +103,8 @@ defmodule Loomkin.Auth.Providers.OpenAITest do
     end
 
     test "uses the correct base URL", %{params: params} do
-      uri = params |> OpenAI.build_authorize_url() |> URI.parse()
+      {:ok, url} = OpenAI.build_authorize_url(params)
+      uri = URI.parse(url)
 
       assert uri.scheme == "https"
       assert uri.host == "auth.openai.com"

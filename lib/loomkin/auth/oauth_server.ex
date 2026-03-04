@@ -42,7 +42,7 @@ defmodule Loomkin.Auth.OAuthServer do
   `:redirect` or `:paste_back`, indicating how the UI should handle
   the authorization URL.
   """
-  @spec start_flow(atom(), String.t()) :: {:ok, String.t(), flow_type()}
+  @spec start_flow(atom(), String.t()) :: {:ok, String.t(), flow_type()} | {:error, term()}
   def start_flow(provider, redirect_uri) do
     GenServer.call(__MODULE__, {:start_flow, provider, redirect_uri})
   end
@@ -85,6 +85,14 @@ defmodule Loomkin.Auth.OAuthServer do
 
   @impl true
   def init(_opts) do
+    # Create ETS table for Google OAuth session params (owned by this GenServer)
+    :ets.new(:loomkin_google_oauth_sessions, [
+      :named_table,
+      :set,
+      :public,
+      read_concurrency: true
+    ])
+
     # flows: %{state_string => %{provider, code_verifier, redirect_uri, state_token, flow_type, timer_ref, started_at}}
     {:ok, %{flows: %{}}}
   end
@@ -97,32 +105,36 @@ defmodule Loomkin.Auth.OAuthServer do
     code_verifier = Provider.generate_code_verifier()
     state_token = Provider.generate_state()
 
-    authorize_url =
-      provider_mod.build_authorize_url(%{
-        state: state_token,
-        code_verifier: code_verifier,
-        redirect_uri: redirect_uri
-      })
+    case provider_mod.build_authorize_url(%{
+           state: state_token,
+           code_verifier: code_verifier,
+           redirect_uri: redirect_uri
+         }) do
+      {:ok, authorize_url} ->
+        # Schedule expiry cleanup
+        timer_ref = Process.send_after(self(), {:flow_expired, state_token}, @flow_timeout_ms)
 
-    # Schedule expiry cleanup
-    timer_ref = Process.send_after(self(), {:flow_expired, state_token}, @flow_timeout_ms)
+        flow = %{
+          provider: provider,
+          code_verifier: code_verifier,
+          redirect_uri: redirect_uri,
+          state_token: state_token,
+          flow_type: flow_type,
+          timer_ref: timer_ref,
+          started_at: System.monotonic_time(:millisecond)
+        }
 
-    flow = %{
-      provider: provider,
-      code_verifier: code_verifier,
-      redirect_uri: redirect_uri,
-      state_token: state_token,
-      flow_type: flow_type,
-      timer_ref: timer_ref,
-      started_at: System.monotonic_time(:millisecond)
-    }
+        Logger.info(
+          "Started #{flow_type} OAuth flow for #{provider} (state: #{String.slice(state_token, 0..7)}...)"
+        )
 
-    Logger.info(
-      "Started #{flow_type} OAuth flow for #{provider} (state: #{String.slice(state_token, 0..7)}...)"
-    )
+        new_state = put_in(state.flows[state_token], flow)
+        {:reply, {:ok, authorize_url, flow_type}, new_state}
 
-    new_state = put_in(state.flows[state_token], flow)
-    {:reply, {:ok, authorize_url, flow_type}, new_state}
+      {:error, reason} ->
+        Logger.error("Failed to build authorize URL for #{provider}: #{inspect(reason)}")
+        {:reply, {:error, {:authorize_url_failed, reason}}, state}
+    end
   end
 
   @impl true
@@ -195,6 +207,9 @@ defmodule Loomkin.Auth.OAuthServer do
           "OAuth flow expired for #{flow.provider} (state: #{String.slice(state_token, 0..7)}...)"
         )
 
+        # Piggyback: clean up stale Google OAuth session entries
+        cleanup_stale_sessions()
+
         {:noreply, %{state | flows: remaining_flows}}
     end
   end
@@ -246,5 +261,18 @@ defmodule Loomkin.Auth.OAuthServer do
     Enum.find_value(flows, fn {state_token, flow} ->
       if flow.provider == provider, do: {state_token, flow}
     end)
+  end
+
+  # Clean up stale Google OAuth session entries older than the flow timeout.
+  defp cleanup_stale_sessions do
+    table = :loomkin_google_oauth_sessions
+    cutoff = System.monotonic_time(:second) - div(@flow_timeout_ms, 1000)
+
+    :ets.tab2list(table)
+    |> Enum.each(fn {key, _session_params, inserted_at} ->
+      if inserted_at < cutoff, do: :ets.delete(table, key)
+    end)
+  rescue
+    ArgumentError -> :ok
   end
 end

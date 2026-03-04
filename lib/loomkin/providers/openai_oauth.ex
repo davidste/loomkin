@@ -70,9 +70,8 @@ defmodule Loomkin.Providers.OpenAIOAuth do
 
   @impl ReqLLM.Provider
   def prepare_request(:chat, model_spec, prompt, opts) do
-    {oauth_token, account_id} = fetch_token_and_account!()
-
-    with {:ok, model} <- resolve_model(model_spec),
+    with {:ok, {oauth_token, account_id}} <- fetch_token_and_account(),
+         {:ok, model} <- resolve_model(model_spec),
          {:ok, context} <- ReqLLM.Context.normalize(prompt, opts),
          opts_with_context = Keyword.put(opts, :context, context),
          opts_with_key = Keyword.put(opts_with_context, :api_key, oauth_token),
@@ -154,8 +153,13 @@ defmodule Loomkin.Providers.OpenAIOAuth do
 
   @impl ReqLLM.Provider
   def attach(request, model, user_opts) do
-    {oauth_token, account_id} = fetch_token_and_account!()
-    attach_with_account(request, model, user_opts, oauth_token, account_id)
+    case fetch_token_and_account() do
+      {:ok, {oauth_token, account_id}} ->
+        attach_with_account(request, model, user_opts, oauth_token, account_id)
+
+      {:error, _} ->
+        raise "No OAuth token available for OpenAI. Connect via Settings."
+    end
   end
 
   defp attach_with_account(request, model, user_opts, oauth_token, account_id) do
@@ -244,7 +248,11 @@ defmodule Loomkin.Providers.OpenAIOAuth do
 
   @impl ReqLLM.Provider
   def attach_stream(model, context, opts, _finch_name) do
-    {oauth_token, account_id} = fetch_token_and_account!()
+    {oauth_token, account_id} =
+      case fetch_token_and_account() do
+        {:ok, result} -> result
+        {:error, _} -> raise "No OAuth token available for OpenAI. Connect via Settings."
+      end
 
     req_only_keys = [
       :params,
@@ -309,11 +317,10 @@ defmodule Loomkin.Providers.OpenAIOAuth do
 
   # ── Internal helpers ────────────────────────────────────────────────
 
-  defp fetch_token_and_account! do
+  defp fetch_token_and_account do
     case TokenStore.get_access_token(:openai) do
       nil ->
-        raise RuntimeError,
-          message: "No OAuth token available for OpenAI. Connect via Settings."
+        {:error, :no_oauth_token}
 
       token ->
         account_id = OpenAIAuth.extract_account_id(token)
@@ -324,7 +331,7 @@ defmodule Loomkin.Providers.OpenAIOAuth do
           )
         end
 
-        {token, account_id}
+        {:ok, {token, account_id}}
     end
   end
 

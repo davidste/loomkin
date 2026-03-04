@@ -42,6 +42,13 @@ defmodule LoomkinWeb.AuthController do
         {:ok, authorize_url, :redirect} ->
           # Standard redirect flow
           redirect(conn, external: authorize_url)
+
+        {:error, reason} ->
+          Logger.error("Failed to start OAuth flow for #{provider}: #{inspect(reason)}")
+
+          conn
+          |> put_status(:internal_server_error)
+          |> json(%{error: "Failed to start OAuth flow. Please try again."})
       end
     else
       {:error, :unknown_provider} ->

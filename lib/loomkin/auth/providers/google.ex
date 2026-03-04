@@ -79,8 +79,6 @@ defmodule Loomkin.Auth.Providers.Google do
   def build_authorize_url(params) do
     %{state: state_token, redirect_uri: redirect_uri} = params
 
-    ensure_session_table()
-
     config = assent_config(redirect_uri, state_token)
 
     case Assent.Strategy.Google.authorize_url(config) do
@@ -89,11 +87,11 @@ defmodule Loomkin.Auth.Providers.Google do
         # them in exchange_code when the callback arrives
         :ets.insert(@session_table, {state_token, session_params, System.monotonic_time(:second)})
 
-        url
+        {:ok, url}
 
       {:error, error} ->
         Logger.error("Google OAuth authorize_url failed: #{inspect(error)}")
-        raise "Failed to build Google authorize URL: #{inspect(error)}"
+        {:error, {:authorize_url_failed, error}}
     end
   end
 
@@ -210,20 +208,7 @@ defmodule Loomkin.Auth.Providers.Google do
   end
 
   # ── Session params ETS management ──────────────────────────────────
-
-  defp ensure_session_table do
-    case :ets.whereis(@session_table) do
-      :undefined ->
-        :ets.new(@session_table, [:named_table, :set, :public, read_concurrency: true])
-
-      _ref ->
-        :ok
-    end
-  rescue
-    ArgumentError ->
-      # Table may already exist (race condition); that's fine
-      :ok
-  end
+  # NOTE: The ETS table is created and owned by OAuthServer in its init/1.
 
   defp pop_session_params(state_token) do
     case :ets.lookup(@session_table, state_token) do
